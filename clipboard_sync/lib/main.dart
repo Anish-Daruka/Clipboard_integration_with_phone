@@ -29,28 +29,27 @@ class ClipboardMonitor extends StatefulWidget {
 class _ClipboardMonitorState extends State<ClipboardMonitor> {
   final StreamController<String> clipboardContentStream =
       StreamController<String>.broadcast();
-  late Timer clipboardTriggerTimer;
+  Timer? clipboardTriggerTimer;
   late IO.Socket socket;
-  var clipdata = "";
+  String clipdata = "";
+  bool isConnected = false;
 
   @override
   void initState() {
     super.initState();
-    connectt();
   }
 
   void startClipboardMonitor() {
-    clipboardTriggerTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      Clipboard.getData('text/plain').then((clipboardData) {
-        if (clipboardData != null &&
-            clipboardData.text != null &&
-            clipdata != clipboardData.text) {
-          clipdata = clipboardData.text!;
-
-          socket.emit('clipboard_from_android', clipdata);
-          print("📤 Sent to server: $clipdata");
-        }
-      });
+    print('📋 Clipboard monitor running...');
+    clipboardTriggerTimer = Timer.periodic(const Duration(seconds: 2), (
+      _,
+    ) async {
+      final clipboardData = await Clipboard.getData('text/plain');
+      if (clipboardData?.text != null && clipboardData!.text != clipdata) {
+        clipdata = clipboardData.text!;
+        socket.emit('clipboard_from_android', clipdata);
+        print("📤 Sent to server: $clipdata");
+      }
     });
   }
 
@@ -60,30 +59,40 @@ class _ClipboardMonitorState extends State<ClipboardMonitor> {
   }
 
   void connectt() {
-    print("here1");
-
     socket = IO.io(
-      'http://Anishs-MacBook-Air-5.local:5050',
+      'http://{yourIp}:5050',
       IO.OptionBuilder().setTransports(['websocket']).build(),
     );
-    print("here");
 
     socket.connect();
 
     socket.onConnect((_) {
-      print('✅ Socket connected');
-    });
+      print('🔌 Connected to server');
+      socket.emit('clipboard_from_android', "start...");
+      setState(() => isConnected = true);
 
-    socket.onDisconnect((_) {
-      print('❌ Socket disconnected');
-    });
+      socket.on('clipboard_from_mac', (data) {
+        print("📥 Received from server: $data");
+        copyToClipboard(data);
+      });
 
-    startClipboardMonitor();
+      startClipboardMonitor();
+    });
+  }
+
+  void disconnectt() {
+    clipboardTriggerTimer?.cancel();
+    print('🔌 Disconnected from server');
+    socket.emit('clipboard_from_android', "stop...");
+    Future.delayed(const Duration(seconds: 1), () {
+      socket.disconnect();
+      setState(() => isConnected = false);
+    });
   }
 
   @override
   void dispose() {
-    clipboardTriggerTimer.cancel();
+    clipboardTriggerTimer?.cancel();
     clipboardContentStream.close();
     socket.dispose();
     super.dispose();
@@ -92,8 +101,43 @@ class _ClipboardMonitorState extends State<ClipboardMonitor> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Clipboard Monitor')),
-      body: Center(child: Text((clipdata == '') ? 'No data' : clipdata)),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 1,
+        title: const Text(
+          'Clipboard Sync',
+          style: TextStyle(color: Colors.black),
+        ),
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.black),
+      ),
+      body: Center(
+        child: GestureDetector(
+          onTap: isConnected ? disconnectt : connectt,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: isConnected ? Colors.blue : Colors.grey[300],
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(
+              Icons.sync,
+              color: isConnected ? Colors.white : Colors.blueGrey,
+              size: 40,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
